@@ -8,11 +8,12 @@ import (
 	"github.com/ZeroGCDev/zerotui/style"
 )
 
-// Column describes one table column. Width is in cells; a Width of 0 means "fill remaining space" (only the last such column is honored).
+// Column describes one table column. Width is fixed cells; Width 0 makes the column flexible. Weight controls the share of remaining space.
 type Column struct {
-	Title string
-	Width int
-	Align Align
+	Title  string
+	Width  int // fixed width in cells; 0 = flexible
+	Weight int // flexible share; 0 means weight 1
+	Align  Align
 }
 
 type Align uint8
@@ -24,10 +25,17 @@ const (
 
 // Table renders a header row plus a scrollable, keyboard/mouse-navigable body - open positions, the order book ladder, a trade blotter, etc. Rows are supplied by the caller each frame (or cached and only replaced on change); Table itself does not allocate during Draw.
 type Table struct {
+	// SelectionForeground/SelectionBackground control the complete selected row.
+	SelectionForeground *color.Color
+	SelectionBackground *color.Color
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	Columns    []Column
-	Rows       [][]string                 // Rows[i][j] must line up with Columns
-	RowStyle   func(row int) *style.Style // optional per-row override (e.g. green/red PNL)
+	Rows       [][]string                      // Rows[i][j] must line up with Columns
+	RowStyle   func(row int) *style.Style      // optional per-row override (e.g. green/red PNL)
+	CellStyle  func(row, col int) *style.Style // optional per-cell style
 	Selected   int
 	Background *color.Color // nil = inherit whatever's behind it (default); fills header + unselected rows
 	Zebra      bool         // alternate row surface for dense modern tables
@@ -40,6 +48,9 @@ func NewTable(columns []Column) *Table {
 }
 
 func (t *Table) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if t.ThemeOverride != nil {
+		theme = t.ThemeOverride
+	}
 	if area.H < 1 {
 		return
 	}
@@ -80,8 +91,15 @@ func (t *Table) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme)
 				rowSt = bgOr(*custom, t.Background)
 			}
 		}
-		if ri == t.Selected && t.focused {
-			rowSt = theme.Selected // intentionally ignores Background: selection must stay legible
+		selected := ri == t.Selected && t.focused
+		if selected {
+			rowSt = theme.Selected
+			if t.SelectionForeground != nil {
+				rowSt = rowSt.WithFg(*t.SelectionForeground)
+			}
+			if t.SelectionBackground != nil {
+				rowSt = rowSt.WithBg(*t.SelectionBackground)
+			}
 		}
 		buf.FillRect(area.X, bodyY+row, area.W, 1, ' ', rowSt)
 		x := area.X
@@ -89,35 +107,84 @@ func (t *Table) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme)
 			if ci >= len(widths) {
 				break
 			}
-			buf.SetPaddedString(x, bodyY+row, cell, widths[ci], t.Columns[ci].Align == AlignRight, rowSt)
+			cellSt := rowSt
+			if t.CellStyle != nil {
+				if custom := t.CellStyle(ri, ci); custom != nil {
+					cellSt = *custom
+				}
+			}
+			if selected {
+				if t.SelectionForeground != nil {
+					cellSt = cellSt.WithFg(*t.SelectionForeground)
+				} else {
+					cellSt = cellSt.WithFg(theme.Selected.Fg)
+				}
+				if t.SelectionBackground != nil {
+					cellSt = cellSt.WithBg(*t.SelectionBackground)
+				} else {
+					cellSt = cellSt.WithBg(theme.Selected.Bg)
+				}
+			}
+			buf.SetPaddedString(x, bodyY+row, cell, widths[ci], t.Columns[ci].Align == AlignRight, cellSt)
 			x += widths[ci] + 1
 		}
 	}
 }
 
-func (t *Table) resolveWidths(totalW int) []int {
-	n := len(t.Columns)
-	if n != len(t.widthCache) {
-		t.widthCache = make([]int, n)
+func resolveColumnWidths(columns []Column, total int, cache []int) []int {
+	if len(cache) != len(columns) {
+		cache = make([]int, len(columns))
 	}
-	used, fillIdx := 0, -1
-	for i := 0; i < n; i++ {
-		c := t.Columns[i]
-		if c.Width == 0 {
-			fillIdx = i
-			t.widthCache[i] = 0
+	used, flex, weightTotal, lastFlex := 0, 0, 0, -1
+	for i, c := range columns {
+		if c.Width > 0 {
+			cache[i] = c.Width
+			used += c.Width + 1
 			continue
 		}
-		t.widthCache[i] = c.Width
-		used += c.Width + 1
-	}
-	if fillIdx >= 0 {
-		remain := totalW - used
-		if remain < 4 {
-			remain = 4
+		w := c.Weight
+		if w <= 0 {
+			w = 1
 		}
-		t.widthCache[fillIdx] = remain
+		cache[i] = 0
+		flex++
+		weightTotal += w
+		lastFlex = i
 	}
+	if flex == 0 {
+		return cache
+	}
+	remaining := total - used - (flex - 1)
+	if remaining < flex*4 {
+		remaining = flex * 4
+	}
+	allocated := 0
+	for i, c := range columns {
+		if c.Width > 0 {
+			continue
+		}
+		w := c.Weight
+		if w <= 0 {
+			w = 1
+		}
+		width := remaining * w / weightTotal
+		if width < 4 {
+			width = 4
+		}
+		if i == lastFlex {
+			width = remaining - allocated
+		}
+		if width < 1 {
+			width = 1
+		}
+		cache[i] = width
+		allocated += width
+	}
+	return cache
+}
+
+func (t *Table) resolveWidths(totalW int) []int {
+	t.widthCache = resolveColumnWidths(t.Columns, totalW, t.widthCache)
 	return t.widthCache
 }
 

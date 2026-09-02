@@ -399,9 +399,7 @@ func (b *Buffer) ClearRegion(r Rect, st style.Style) {
 	c := Cell{Ch: ' ', Style: st}
 	for y := r.Y; y < r.Y+r.H; y++ {
 		row := b.back[y*b.W+r.X : y*b.W+r.X+r.W]
-		for i := range row {
-			row[i] = c
-		}
+		fillCells(row, c)
 		b.markDirtyRange(y*b.W+r.X, y*b.W+r.X+r.W)
 	}
 }
@@ -653,9 +651,7 @@ func (b *Buffer) FillRect(x, y, w, h int, ch rune, st style.Style) {
 	c := Cell{Ch: ch, Style: st}
 	for row := r.Y; row < r.Y+r.H; row++ {
 		cells := b.back[row*b.W+r.X : row*b.W+r.X+r.W]
-		for i := range cells {
-			cells[i] = c
-		}
+		fillCells(cells, c)
 		b.markDirtyRange(row*b.W+r.X, row*b.W+r.X+r.W)
 	}
 }

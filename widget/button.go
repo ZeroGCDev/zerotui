@@ -10,6 +10,9 @@ import (
 
 // Button is a clickable/enter-activated action control.
 type Button struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	Label      string
 	OnPress    func()
@@ -25,6 +28,9 @@ func NewButton(label string, onPress func()) *Button {
 func (b *Button) OwnsBackground() bool { return b.Background != nil }
 
 func (b *Button) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if b.ThemeOverride != nil {
+		theme = b.ThemeOverride
+	}
 	if area.H <= 0 {
 		return
 	}

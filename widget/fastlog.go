@@ -12,6 +12,9 @@ import (
 // bounded ring of lines and renders only the visible viewport. Appending a
 // line happens on the producer/update path; Draw never allocates.
 type FastLogView struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	lines      []string
 	head       int
@@ -47,6 +50,9 @@ func (l *FastLogView) Append(line string) {
 func (l *FastLogView) OwnsBackground() bool { return l.Background != nil }
 
 func (l *FastLogView) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if l.ThemeOverride != nil {
+		theme = l.ThemeOverride
+	}
 	if area.W <= 0 || area.H <= 0 {
 		return
 	}

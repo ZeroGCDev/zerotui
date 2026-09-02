@@ -25,21 +25,24 @@ The old atomic snapshot path allocated a bookSnapshot on every update; the new
 path avoids that steady-state GC pressure while keeping Draw race-free.
 */
 type OrderBook struct {
-	mu           sync.RWMutex
-	bids         []Level
-	asks         []Level
-	bidCount     int
-	askCount     int
-	Decimals     int
-	SizeDecimals int
-	ShowDecimals int
-	Background   *color.Color // nil = inherit whatever's behind it
-	scratch      [32]byte
-	dirtyFrom    int
-	dirtyTo      int
-	dirtyFull    bool
-	bidMaxSize   uint64
-	askMaxSize   uint64
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	mu            sync.RWMutex
+	bids          []Level
+	asks          []Level
+	bidCount      int
+	askCount      int
+	Decimals      int
+	SizeDecimals  int
+	ShowDecimals  int
+	Background    *color.Color // nil = inherit whatever's behind it
+	scratch       [32]byte
+	dirtyFrom     int
+	dirtyTo       int
+	dirtyFull     bool
+	bidMaxSize    uint64
+	askMaxSize    uint64
 }
 
 func NewOrderBook(decimals, sizeDecimals, showDecimals int) *OrderBook {
@@ -185,6 +188,9 @@ func (o *OrderBook) DirtyRegions(area geometry.Rect, dst []geometry.Rect) []geom
 func (o *OrderBook) OwnsBackground() bool { return o.Background != nil }
 
 func (o *OrderBook) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if o.ThemeOverride != nil {
+		theme = o.ThemeOverride
+	}
 	if area.W < 10 || area.H < 1 {
 		return
 	}

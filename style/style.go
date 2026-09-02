@@ -6,7 +6,7 @@ import "github.com/ZeroGCDev/zerotui/color"
 type Attr uint8
 
 const (
-	AttrNone Attr = 1 << iota
+	AttrNone Attr = 0
 	Bold
 	Dim
 	Underline
@@ -27,11 +27,39 @@ func New(fg, bg color.Color) Style { return Style{Fg: fg, Bg: bg} }
 
 func (s Style) WithAttr(a Attr) Style { s.Attr |= a; return s }
 
+// WithoutAttr returns a copy of s with the supplied terminal attributes cleared.
+func (s Style) WithoutAttr(a Attr) Style { s.Attr &^= a; return s }
+
 // WithBg returns a copy of s with the background swapped, used everywhere a widget's optional per-instance Background override is applied.
 func (s Style) WithBg(bg color.Color) Style { s.Bg = bg; return s }
 
 // WithFg returns a copy of s with the foreground swapped.
 func (s Style) WithFg(fg color.Color) Style { s.Fg = fg; return s }
+
+// Clone returns an independent theme value. Prepare clones during setup when a
+// single component needs a small palette variation; Draw never needs to copy a
+// theme.
+func (t *Theme) Clone() *Theme {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	return &c
+}
+
+// WithBackground returns a copy with every role using the supplied background.
+// It is intended for building component themes during setup, not in Draw.
+func (t *Theme) WithBackground(bg color.Color) *Theme {
+	c := t.Clone()
+	if c == nil {
+		return nil
+	}
+	roles := []*Style{&c.Background, &c.Panel, &c.Border, &c.BorderFocus, &c.Text, &c.TextMuted, &c.Title, &c.Positive, &c.Negative, &c.Warning, &c.Info, &c.Selected, &c.TrackFull, &c.TrackEmpty}
+	for _, st := range roles {
+		st.Bg = bg
+	}
+	return c
+}
 
 func TokyoNightTheme() *Theme {
 	return &Theme{

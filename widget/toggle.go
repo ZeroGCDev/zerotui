@@ -14,6 +14,9 @@ import (
 Toggle is an on/off control bound directly to an atomic uint32 (0 or 1), the same pattern the market-data hot path uses for AlgoActive/SLEnabled. Reading/writing it from Draw and HandleKey/HandleMouse never allocates and is safe to touch concurrently from a separate risk-engine goroutine.
 */
 type Toggle struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	Label      string
 	Value      *uint32      // 0 = off, 1 = on
@@ -48,6 +51,9 @@ Draw renders "[X] Label  FLAG" for one row. Focus is shown with the same theme.S
 func (t *Toggle) OwnsBackground() bool { return t.Background != nil }
 
 func (t *Toggle) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if t.ThemeOverride != nil {
+		theme = t.ThemeOverride
+	}
 	if area.H <= 0 {
 		return
 	}

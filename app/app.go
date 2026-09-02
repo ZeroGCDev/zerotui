@@ -89,6 +89,7 @@ type App struct {
 	lastLayoutRoot   layout.Node
 	layoutEpoch      uint64
 	computedEpoch    uint64
+	batchDepth       atomic.Int32
 	hasLayoutCache   bool
 
 	damageMu            sync.Mutex
@@ -223,9 +224,49 @@ func (a *App) wakeRender() {
 // for market-data bursts because hundreds of updates can collapse into one
 // render wakeup without a mutex or allocation.
 func (a *App) requestRender() {
+	if a.batchDepth.Load() > 0 {
+		a.dirty.Store(true)
+		return
+	}
 	if !a.dirty.Swap(true) {
 		a.wakeRender()
 	}
+}
+
+// BeginBatch coalesces a burst of invalidations into one render wakeup. It is
+// useful when a producer updates several widgets as one logical transaction.
+// Batching affects scheduling only; it does not hold the renderer lock.
+func (a *App) BeginBatch() {
+	a.batchDepth.Add(1)
+}
+
+// EndBatch releases one update batch. The final EndBatch wakes the renderer if
+// anything was invalidated while the batch was open. Calls are nestable.
+func (a *App) EndBatch() {
+	for {
+		n := a.batchDepth.Load()
+		if n <= 0 {
+			return
+		}
+		if !a.batchDepth.CompareAndSwap(n, n-1) {
+			continue
+		}
+		if n == 1 && a.dirty.Load() {
+			a.wakeRender()
+		}
+		return
+	}
+}
+
+// SetTheme swaps the application theme without rebuilding the layout. The
+// next frame repaints the screen; callers can therefore implement a runtime
+// theme switch without restarting the application.
+func (a *App) SetTheme(theme *style.Theme) {
+	if theme == nil {
+		return
+	}
+	a.Theme = theme
+	a.Invalidate()
 }
 
 // RequestLive enables continuous frames for animation/streaming widgets. It

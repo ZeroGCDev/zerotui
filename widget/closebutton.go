@@ -2,6 +2,7 @@ package widget
 
 import (
 	"github.com/ZeroGCDev/zerotui/buffer"
+	"github.com/ZeroGCDev/zerotui/color"
 	"github.com/ZeroGCDev/zerotui/geometry"
 	"github.com/ZeroGCDev/zerotui/input"
 	"github.com/ZeroGCDev/zerotui/style"
@@ -11,7 +12,11 @@ import (
 // It is deliberately not focusable, so adding close controls does not expand
 // the keyboard focus ring or create per-frame work.
 type CloseButton struct {
-	OnClose func()
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	Background    *color.Color
+	OnClose       func()
 }
 
 func NewCloseButton(onClose func()) *CloseButton {
@@ -19,11 +24,15 @@ func NewCloseButton(onClose func()) *CloseButton {
 }
 
 func (b *CloseButton) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if b.ThemeOverride != nil {
+		theme = b.ThemeOverride
+	}
 	if area.W < 1 || area.H < 1 {
 		return
 	}
-	st := theme.Border
+	st := bgOr(theme.Title, b.Background).WithBg(theme.Panel.Bg).WithAttr(style.Bold)
 	if area.W >= 3 {
+		buf.FillRect(area.X, area.Y, 3, 1, ' ', st)
 		buf.SetString(area.X, area.Y, "[x]", st)
 	} else {
 		buf.Set(area.X, area.Y, 'x', st)

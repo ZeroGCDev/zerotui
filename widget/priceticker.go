@@ -16,14 +16,17 @@ PriceTicker reads a scaled fixed-point price from an atomic uint64 (the same rep
 It also flashes Positive/Negative styling on up/down ticks, which is pure render-thread state (not atomic; only the render goroutine touches it) so it costs nothing extra.
 */
 type PriceTicker struct {
-	Label      string
-	Price      *uint64      // atomic, scaled by 10^Decimals
-	Decimals   int          // full internal precision of *Price
-	Show       int          // visible decimal digits (<=Decimals)
-	Background *color.Color // nil = inherit whatever's behind it (default)
-	prevSeen   uint64
-	haveSeen   bool
-	scratch    [32]byte
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	Label         string
+	Price         *uint64      // atomic, scaled by 10^Decimals
+	Decimals      int          // full internal precision of *Price
+	Show          int          // visible decimal digits (<=Decimals)
+	Background    *color.Color // nil = inherit whatever's behind it (default)
+	prevSeen      uint64
+	haveSeen      bool
+	scratch       [32]byte
 }
 
 func NewPriceTicker(label string, price *uint64, decimals, show int) *PriceTicker {
@@ -34,6 +37,9 @@ func NewPriceTicker(label string, price *uint64, decimals, show int) *PriceTicke
 func (p *PriceTicker) OwnsBackground() bool { return p.Background != nil }
 
 func (p *PriceTicker) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if p.ThemeOverride != nil {
+		theme = p.ThemeOverride
+	}
 	if area.H <= 0 {
 		return
 	}

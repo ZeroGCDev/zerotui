@@ -9,11 +9,14 @@ import (
 
 // Panel draws a titled border box around a child widget, inset by one cell. It's the standard grouping container for a dashboard section ("RISK CONTROLS", "ORDER BOOK", "OPEN POSITIONS", ...).
 type Panel struct {
-	Title      string
-	Child      Widget
-	Focused    bool // draws BorderFocus instead of Border when true
-	Rounded    bool
-	Background *color.Color // nil = theme.Panel (default); overrides the interior fill
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	Title         string
+	Child         Widget
+	Focused       bool // draws BorderFocus instead of Border when true
+	Rounded       bool
+	Background    *color.Color // nil = theme.Panel (default); overrides the interior fill
 }
 
 func NewPanel(title string, child Widget) *Panel {
@@ -24,6 +27,9 @@ func NewPanel(title string, child Widget) *Panel {
 func (p *Panel) OwnsBackground() bool { return true }
 
 func (p *Panel) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if p.ThemeOverride != nil {
+		theme = p.ThemeOverride
+	}
 	st := theme.Border
 	if p.Focused {
 		st = theme.BorderFocus

@@ -33,6 +33,9 @@ func FormatInt(suffix string) SliderFormat {
 
 // Slider is a horizontal track bound to an atomic uint32, driven by keyboard (Left/Right or h/l once routed by the app) and mouse click/drag. This generalizes the SL%/TP%/Leverage tracks from the reference terminal into one reusable, styleable component.
 type Slider struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	Label      string
 	Value      *uint32
@@ -85,6 +88,9 @@ func (s *Slider) setFromRatio(ratio float64) {
 func (s *Slider) OwnsBackground() bool { return s.Background != nil }
 
 func (s *Slider) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if s.ThemeOverride != nil {
+		theme = s.ThemeOverride
+	}
 	if area.H <= 0 || area.W <= 0 {
 		return
 	}

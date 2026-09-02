@@ -6,6 +6,7 @@ import (
 	"github.com/ZeroGCDev/zerotui/buffer"
 	"github.com/ZeroGCDev/zerotui/color"
 	"github.com/ZeroGCDev/zerotui/geometry"
+	"github.com/ZeroGCDev/zerotui/input"
 	"github.com/ZeroGCDev/zerotui/style"
 )
 
@@ -261,5 +262,171 @@ func TestOrderBookBothSideBarsRenderIndependently(t *testing.T) {
 	}
 	if !foundAsk {
 		t.Fatalf("ask side bar disappeared after ask-only update")
+	}
+}
+
+func TestThemeOverrideUsesComponentTheme(t *testing.T) {
+	buf := buffer.New(20, 3)
+	base := style.TokyoNightTheme()
+	custom := *base
+	custom.Text = custom.Text.WithFg(color.RGB(1, 2, 3))
+	l := NewLabel("x")
+	l.ThemeOverride = &custom
+	l.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 20, H: 1}, base)
+	if got := buf.CellAt(0, 0).Style.Fg; got != color.RGB(1, 2, 3) {
+		t.Fatalf("ThemeOverride foreground = %v, want custom color", got)
+	}
+}
+
+func TestVirtualTableSelectionCoversScrollbarColumn(t *testing.T) {
+	buf := buffer.New(20, 5)
+	theme := style.TokyoNightTheme()
+	table := NewVirtualTable([]Column{{Title: "A", Width: 10}}, 100, func(row, col int) string { return "x" })
+	table.ShowScrollBar = true
+	table.Focus(true)
+	table.Selected = 0
+	table.SelectionForeground = ptrColorForTest(color.RGB(250, 250, 250))
+	table.SelectionBackground = ptrColorForTest(color.RGB(10, 100, 200))
+	table.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 20, H: 5}, theme)
+	if got := buf.CellAt(19, 1).Style.Bg; got != color.RGB(10, 100, 200) {
+		t.Fatalf("selected row scrollbar cell bg = %v, want full-row selection bg", got)
+	}
+}
+
+func TestVirtualTableSelectedScrollbarKeepsThumbGlyph(t *testing.T) {
+	buf := buffer.New(20, 8)
+	theme := style.TokyoNightTheme()
+	table := NewVirtualTable([]Column{{Title: "A", Width: 10}}, 100, func(row, col int) string { return "x" })
+	table.ShowScrollBar = true
+	table.Focus(true)
+	table.Selected = 0
+	table.ScrollTrack = ptrColorForTest(color.RGB(90, 90, 90))
+	table.ScrollThumb = ptrColorForTest(color.RGB(120, 180, 240))
+	table.SelectionBackground = ptrColorForTest(color.RGB(40, 80, 160))
+	table.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 20, H: 8}, theme)
+	if got := buf.CellAt(19, 1).Ch; got != '█' {
+		t.Fatalf("selected scrollbar glyph = %q, want continuous thumb glyph", got)
+	}
+	if got := buf.CellAt(19, 1).Style.Bg; got != color.RGB(40, 80, 160) {
+		t.Fatalf("selected scrollbar bg = %v, want selection bg", got)
+	}
+}
+
+func TestVirtualTableSelectionDirtyRegionsCoverBody(t *testing.T) {
+	table := NewVirtualTable([]Column{{Title: "A", Width: 10}}, 100, func(row, col int) string { return "x" })
+	table.Selected = 5
+	table.scroll = 0
+	if !table.HandleKey(input.Key{Type: input.KeyDown}) {
+		t.Fatal("down key was not consumed")
+	}
+	var dst [2]geometry.Rect
+	regions := table.DirtyRegions(geometry.Rect{X: 10, Y: 20, W: 100, H: 10}, dst[:])
+	want := geometry.Rect{X: 10, Y: 21, W: 100, H: 9}
+	if len(regions) != 1 || regions[0] != want {
+		t.Fatalf("selection dirty regions = %v, want [%+v]", regions, want)
+	}
+}
+
+func TestVirtualTableScrollDirtyRegionCoversVisibleBody(t *testing.T) {
+	table := NewVirtualTable([]Column{{Title: "A", Width: 10}}, 100, func(row, col int) string { return "x" })
+	table.Selected = 0
+	table.scroll = 0
+	if !table.HandleMouse(input.MouseEvent{Action: input.MouseWheelDown, X: 2, Y: 2}, geometry.Rect{X: 0, Y: 0, W: 20, H: 6}) {
+		t.Fatal("wheel event was not consumed")
+	}
+	var dst [2]geometry.Rect
+	regions := table.DirtyRegions(geometry.Rect{X: 0, Y: 0, W: 20, H: 6}, dst[:])
+	want := geometry.Rect{X: 0, Y: 1, W: 20, H: 5}
+	if len(regions) != 1 || regions[0] != want {
+		t.Fatalf("wheel dirty regions = %v, want [%+v]", regions, want)
+	}
+}
+
+func ptrColorForTest(c color.Color) *color.Color { return &c }
+
+func BenchmarkLabelDrawWithThemeOverride(b *testing.B) {
+	buf := buffer.New(80, 24)
+	base := style.TokyoNightTheme()
+	custom := *base
+	custom.Text = custom.Text.WithFg(color.RGB(200, 210, 220))
+	l := NewLabel("hot path")
+	l.ThemeOverride = &custom
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		l.Draw(buf, testArea, base)
+	}
+}
+
+func TestVirtualTableClipSkipsInvisibleRows(t *testing.T) {
+	calls := 0
+	table := NewVirtualTable([]Column{{Title: "A", Width: 10}}, 100, func(row, col int) string { calls++; return "x" })
+	buf := buffer.New(20, 20)
+	buf.SetClip(buffer.Rect{X: 0, Y: 6, W: 20, H: 1})
+	table.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 20, H: 12}, style.TokyoNightTheme())
+	buf.ClearClip()
+	if calls != 1 {
+		t.Fatalf("Cell callback calls=%d want 1 for one clipped body row", calls)
+	}
+}
+
+func TestVirtualTableCellStyleCannotBreakSelectionBackground(t *testing.T) {
+	buf := buffer.New(30, 5)
+	theme := style.TokyoNightTheme()
+	table := NewVirtualTable([]Column{{Title: "A", Width: 10}}, 10, func(row, col int) string { return "x" })
+	table.Focus(true)
+	table.Selected = 0
+	custom := style.Style{Fg: color.RGB(1, 2, 3), Bg: color.RGB(4, 5, 6)}
+	table.CellStyle = func(row, col int) *style.Style { return &custom }
+	selectionBG := color.RGB(10, 100, 200)
+	table.SelectionBackground = &selectionBG
+	table.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 30, H: 5}, theme)
+	if got := buf.CellAt(0, 1).Style.Bg; got != selectionBG {
+		t.Fatalf("selected cell bg=%v want %v", got, selectionBG)
+	}
+}
+
+func TestVirtualListSelectionDirtyRegions(t *testing.T) {
+	l := NewVirtualList(100, func(i int) string { return "x" })
+	l.Selected = 2
+	if !l.HandleKey(input.Key{Type: input.KeyDown}) {
+		t.Fatal("down not consumed")
+	}
+	var dst [4]geometry.Rect
+	r := l.DirtyRegions(geometry.Rect{X: 5, Y: 7, W: 20, H: 6}, dst[:])
+	if len(r) != 2 {
+		t.Fatalf("regions=%d want 2", len(r))
+	}
+	if r[0].W != 20 || r[1].W != 20 {
+		t.Fatalf("selection regions must span full width: %+v", r)
+	}
+}
+
+func BenchmarkVirtualTableClippedSelection(b *testing.B) {
+	buf := buffer.New(120, 40)
+	t := NewVirtualTable([]Column{{Title: "A", Width: 20}, {Title: "B", Width: 20}}, 100000, func(row, col int) string { return "value" })
+	t.Focus(true)
+	t.Selected = 12
+	theme := style.TokyoNightTheme()
+	buf.SetClip(buffer.Rect{X: 0, Y: 13, W: 120, H: 1})
+	t.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 120, H: 40}, theme)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		t.Draw(buf, geometry.Rect{X: 0, Y: 0, W: 120, H: 40}, theme)
+	}
+}
+
+func TestVirtualTableSelectionDamageIsFullBody(t *testing.T) {
+	table := NewVirtualTable([]Column{{Title: "A", Width: 8}}, 100, func(row, col int) string { return "row" })
+	table.focused = true
+	table.Selected = 5
+	table.dirtySelection = true
+	table.dirtySelected = 4
+	table.dirtyScroll = 0
+	dst := make([]geometry.Rect, 0, 2)
+	got := table.DirtyRegions(geometry.Rect{X: 10, Y: 20, W: 80, H: 12}, dst)
+	if len(got) != 1 || got[0] != (geometry.Rect{X: 10, Y: 21, W: 80, H: 11}) {
+		t.Fatalf("damage=%v want one full body region", got)
 	}
 }

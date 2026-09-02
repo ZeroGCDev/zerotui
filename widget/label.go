@@ -13,11 +13,14 @@ Label draws static or externally-updated text. It never allocates in Draw; SetTe
 SetText is only safe to call from the render goroutine; if another goroutine (e.g. a feed status callback) needs to update it, set TextFn instead - same pattern as Gauge.ValueFn - reading from your own atomic.Value/atomic.Uint64.
 */
 type Label struct {
-	Text       string
-	TextFn     func() string // if set, takes priority over Text every Draw
-	Style      *style.Style  // nil = theme.Text
-	Bold       bool
-	Background *color.Color // nil = inherit whatever's behind it (default)
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	Text          string
+	TextFn        func() string // if set, takes priority over Text every Draw
+	Style         *style.Style  // nil = theme.Text
+	Bold          bool
+	Background    *color.Color // nil = inherit whatever's behind it (default)
 }
 
 func NewLabel(text string) *Label { return &Label{Text: text} }
@@ -28,6 +31,9 @@ func (l *Label) SetText(s string) { l.Text = s }
 func (l *Label) OwnsBackground() bool { return l.Background != nil }
 
 func (l *Label) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if l.ThemeOverride != nil {
+		theme = l.ThemeOverride
+	}
 	if area.H <= 0 {
 		return
 	}

@@ -21,16 +21,19 @@ A ring-buffer read/write isn't a single machine word, so - unlike the atomic-sca
 At UI-refresh cadence (tens to low hundreds of Hz) this costs nothing measurable; it does not allocate.
 */
 type Sparkline struct {
-	mu         sync.RWMutex
-	data       []float64
-	head       int
-	count      int
-	UpStyle    *style.Style
-	DownStyle  *style.Style
-	Background *color.Color // nil = inherit whatever's behind it (default)
-	last       float64
-	haveLast   bool
-	scratch    []float64 // reused render-side snapshot; allocated once at construction
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	mu            sync.RWMutex
+	data          []float64
+	head          int
+	count         int
+	UpStyle       *style.Style
+	DownStyle     *style.Style
+	Background    *color.Color // nil = inherit whatever's behind it (default)
+	last          float64
+	haveLast      bool
+	scratch       []float64 // reused render-side snapshot; allocated once at construction
 }
 
 func NewSparkline(capacity int) *Sparkline {
@@ -72,6 +75,9 @@ func (s *Sparkline) DirtyRegions(area geometry.Rect, dst []geometry.Rect) []geom
 }
 
 func (s *Sparkline) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if s.ThemeOverride != nil {
+		theme = s.ThemeOverride
+	}
 	if area.H <= 0 || area.W <= 0 {
 		return
 	}

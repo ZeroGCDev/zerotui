@@ -12,8 +12,10 @@ const (
 // Item is one child of a Flex: either a fixed cell size or, if Size==0, a share of the remaining space proportional to Weight (default weight 1).
 type Item struct {
 	Node   Node
-	Size   int // fixed size in cells; 0 = flexible
+	Size   int // main-axis fixed size in cells; 0 = flexible
 	Weight int // used when Size==0; 0 treated as 1
+	Width  int // optional cross/main override in cells; <=0 = parent width
+	Height int // optional cross/main override in cells; <=0 = parent height
 }
 
 func Fix(n Node, size int) Item     { return Item{Node: n, Size: size} }
@@ -109,8 +111,24 @@ func (f *FlexBox) ComputeInto(area geometry.Rect, out []Placement) []Placement {
 		var childArea geometry.Rect
 		if f.Dir == Horizontal {
 			childArea = geometry.Rect{X: area.X + pos, Y: area.Y, W: size, H: area.H}
+			if it.Width > 0 && it.Width < childArea.W {
+				childArea.X += (childArea.W - it.Width) / 2
+				childArea.W = it.Width
+			}
+			if it.Height > 0 && it.Height < childArea.H {
+				childArea.Y += (childArea.H - it.Height) / 2
+				childArea.H = it.Height
+			}
 		} else {
 			childArea = geometry.Rect{X: area.X, Y: area.Y + pos, W: area.W, H: size}
+			if it.Width > 0 && it.Width < childArea.W {
+				childArea.X += (childArea.W - it.Width) / 2
+				childArea.W = it.Width
+			}
+			if it.Height > 0 && it.Height < childArea.H {
+				childArea.Y += (childArea.H - it.Height) / 2
+				childArea.H = it.Height
+			}
 		}
 		if r, ok := it.Node.(ReusableNode); ok {
 			out = r.ComputeInto(childArea, out)

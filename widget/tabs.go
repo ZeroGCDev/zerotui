@@ -10,6 +10,9 @@ import (
 
 // Tabs is a horizontal tab strip switching between named panels (e.g. "POSITIONS | ORDERS | BLOTTER | RISK"). It only draws the strip; pair it with your own conditional rendering of the active panel's content.
 type Tabs struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	Titles     []string
 	Active     int
@@ -23,6 +26,9 @@ func NewTabs(titles []string) *Tabs { return &Tabs{Titles: titles} }
 func (t *Tabs) OwnsBackground() bool { return t.Background != nil }
 
 func (t *Tabs) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if t.ThemeOverride != nil {
+		theme = t.ThemeOverride
+	}
 	if area.H < 1 {
 		return
 	}

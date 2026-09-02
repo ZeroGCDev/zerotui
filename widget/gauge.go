@@ -12,14 +12,17 @@ import (
 Gauge is a non-interactive progress/utilization bar, e.g. margin usage or risk budget consumed. Value is fine to set directly ONLY from the same goroutine that calls App.Run (the render goroutine). If a separate feed/risk goroutine needs to update it - the common case - store the reading behind your own atomic (e.g. math.Float64bits in an atomic.Uint64) and set ValueFn to load and decode it; ValueFn is called from Draw on every frame and takes priority over Value when non-nil.
 */
 type Gauge struct {
-	Label      string
-	Value      float64 // 0..1
-	ValueFn    func() float64
-	Style      *style.Style // nil = theme.Positive, overridden by thresholds
-	WarnAt     float64      // >0: switch to theme.Warning above this ratio
-	DangerAt   float64      // >0: switch to theme.Negative above this ratio
-	Background *color.Color // nil = inherit whatever's behind it (default)
-	scratch    [8]byte
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	Label         string
+	Value         float64 // 0..1
+	ValueFn       func() float64
+	Style         *style.Style // nil = theme.Positive, overridden by thresholds
+	WarnAt        float64      // >0: switch to theme.Warning above this ratio
+	DangerAt      float64      // >0: switch to theme.Negative above this ratio
+	Background    *color.Color // nil = inherit whatever's behind it (default)
+	scratch       [8]byte
 }
 
 func NewGauge(label string) *Gauge { return &Gauge{Label: label} }
@@ -28,6 +31,9 @@ func NewGauge(label string) *Gauge { return &Gauge{Label: label} }
 func (g *Gauge) OwnsBackground() bool { return g.Background != nil }
 
 func (g *Gauge) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if g.ThemeOverride != nil {
+		theme = g.ThemeOverride
+	}
 	if area.H <= 0 {
 		return
 	}

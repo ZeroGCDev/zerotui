@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/ZeroGCDev/zerotui/app"
-	"github.com/ZeroGCDev/zerotui/color"
 	"github.com/ZeroGCDev/zerotui/input"
 	"github.com/ZeroGCDev/zerotui/layout"
 	"github.com/ZeroGCDev/zerotui/style"
@@ -18,7 +18,8 @@ import (
 const PriceScale uint64 = 1_000_000_000
 
 func main() {
-	theme := style.RosePineTheme()
+	theme := style.NordTheme()
+	tokyoTheme := style.TokyoNightTheme()
 
 	var lastPrice uint64 = 78_900 * PriceScale
 	var simActive uint32 = 1
@@ -53,26 +54,30 @@ func main() {
 
 	symbolInput := widget.NewTextInput("Symbol Name: ")
 	symbolInput.Border = true
-	symbolInput.Background = &color.DimGray
-	symbolInput.SetValue("Type Here ...")
+	symbolInput.SetValue("")
 
-	statusLabel := widget.NewLabel("Status: Active")
+	statusLabel := widget.NewLabel("Status: READY")
+	resultLabel := widget.NewLabel("Last applied: —")
 
-	actionButton := widget.NewButton("TRIGGER SIGNAL", func() {
-		statusLabel.SetText(
-			fmt.Sprintf("Signal queued for %s", symbolInput.String()),
-		)
+	actionButton := widget.NewButton("APPLY SIGNAL", func() {
+		symbol := symbolInput.String()
+		if symbol == "" {
+			symbol = "(empty)"
+		}
+		resultLabel.SetText("Last applied: " + symbol)
+		statusLabel.SetText("Status: SIGNAL QUEUED")
 	})
 
-	controlsBody := layout.NewFlex(
+	controlsBody := layout.Padding(layout.NewFlex(
 		layout.Vertical,
 		layout.Fix(layout.Wrap(simToggle), 1),
 		layout.Fix(layout.Wrap(levSlider), 1),
 		layout.Fix(layout.Wrap(speedSlider), 1),
 		layout.Fix(layout.Wrap(symbolInput), 3),
 		layout.Fix(layout.Wrap(actionButton), 1),
+		layout.Fix(layout.Wrap(resultLabel), 1),
 		layout.Fix(layout.Wrap(statusLabel), 1),
-	)
+	), 1, 0, 1, 0)
 
 	controlsFocused := func() bool {
 		return simToggle.IsFocused() ||
@@ -137,51 +142,53 @@ func main() {
 	columns := []widget.Column{
 		{Title: "INDEX", Width: 8},
 		{Title: "SYMBOL", Width: 12},
-		{
-			Title: "SIM PRICE ($)",
-			Width: 14,
-			Align: widget.AlignRight,
-		},
-		{
-			Title: "VOLUME",
-			Width: 12,
-			Align: widget.AlignRight,
-		},
+		{Title: "SIM PRICE ($)", Width: 16, Align: widget.AlignRight},
+		{Title: "VOLUME", Width: 12, Align: widget.AlignRight},
 		{Title: "STATUS", Width: 10},
 	}
 
-	dataTable := widget.NewVirtualTable(
-		columns,
-		1000,
-		func(row, col int) string {
-			switch col {
-			case 0:
-				return fmt.Sprintf("#%04d", row+1)
+	// Precompute the immutable demo rows once. VirtualTable will return these
+	// existing strings from its callbacks, so scrolling/selection never formats
+	// numbers or allocates strings on the render path.
+	const rowCount = 1000
+	data := make([][5]string, rowCount)
+	for row := 0; row < rowCount; row++ {
+		data[row][0] = "#" + strconv.Itoa(10000 + row + 1)[1:]
+		data[row][1] = symbols[row%len(symbols)]
+		data[row][2] = strconv.FormatFloat(100.0+float64((row*37)%2500), 'f', 2, 64)
+		data[row][3] = strconv.Itoa((row + 1) * 89 % 15000)
+		switch row % 3 {
+		case 0:
+			data[row][4] = "FILLED"
+		case 1:
+			data[row][4] = "PENDING"
+		default:
+			data[row][4] = "ACTIVE"
+		}
+	}
 
-			case 1:
-				return symbols[row%len(symbols)]
-
-			case 2:
-				base := 100.0 + float64((row*37)%2500)
-				return fmt.Sprintf("%.2f", base)
-
-			case 3:
-				return fmt.Sprintf("%d", (row+1)*89%15000)
-
-			case 4:
-				switch row % 3 {
-				case 0:
-					return "FILLED"
-				case 1:
-					return "PENDING"
-				default:
-					return "ACTIVE"
-				}
-			}
-
+	// Keep semantic table colors tied to the active application theme. The
+	// pointer changes only when [t] is pressed, so CellStyle remains allocation-free.
+	activeTheme := theme
+	dataTable := widget.NewVirtualTable(columns, rowCount, func(row, col int) string {
+		if row < 0 || row >= rowCount || col < 0 || col >= 5 {
 			return ""
-		},
-	)
+		}
+		return data[row][col]
+	})
+	dataTable.CellStyle = func(row, col int) *style.Style {
+		if col != 4 || row < 0 || row >= rowCount {
+			return nil
+		}
+		switch row % 3 {
+		case 0:
+			return &activeTheme.Positive
+		case 1:
+			return &activeTheme.Warning
+		default:
+			return &activeTheme.Info
+		}
+	}
 
 	dataTable.ShowScrollBar = true
 	dataTable.Zebra = true
@@ -219,7 +226,7 @@ func main() {
 
 	footer := widget.NewLabel(
 		"Click [x] of each panel to close  • Use Mouse to Scroll • " +
-			" Press [1] Controls  [2] Market  [3] Table to Reopening •  Drag the dividers to resize each Panel  •  [q] Quit",
+			" Press [1] Controls  [2] Market  [3] Table to Reopening  [t] Theme (Nord/Tokyo) •  Drag the dividers to resize each Panel  •  [q] Quit",
 	)
 
 	root := layout.NewFlex(
@@ -259,6 +266,16 @@ func main() {
 		case '3':
 			panel3.Show()
 			a.Relayout()
+			return true
+		case 't':
+			// Keep the table's semantic CellStyle in lock-step with the application theme.
+			if activeTheme == theme {
+				activeTheme = tokyoTheme
+				a.SetTheme(tokyoTheme)
+			} else {
+				activeTheme = theme
+				a.SetTheme(theme)
+			}
 			return true
 		}
 
@@ -365,15 +382,15 @@ func main() {
 
 			book.SetLevels(bids, asks)
 
-			// -------------------------------------------------------------
-			// Targeted redraw.
-			// -------------------------------------------------------------
-
+			// One logical market tick updates several widgets. Batch the
+			// invalidations so the scheduler sees one wakeup instead of three.
+			a.BeginBatch()
 			a.InvalidateWidgets(
 				ticker,
 				spark,
 				book,
 			)
+			a.EndBatch()
 		}
 	}()
 

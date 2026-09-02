@@ -37,3 +37,23 @@ func TestRetainedLayoutCacheHit(t *testing.T) {
 		t.Fatal("expected retained layout cache hit")
 	}
 }
+
+func TestBatchCoalescesWakeupsAndThemeSwapInvalidates(t *testing.T) {
+	a := New(layout.Wrap(&metricLeaf{}), style.TokyoNightTheme())
+	a.BeginBatch()
+	a.Invalidate()
+	a.Invalidate()
+	if a.batchDepth.Load() != 1 {
+		t.Fatalf("batch depth=%d want 1", a.batchDepth.Load())
+	}
+	a.EndBatch()
+	if !a.dirty.Load() {
+		t.Fatal("batch should leave app dirty")
+	}
+	custom := style.NordTheme()
+	a.dirty.Store(false)
+	a.SetTheme(custom)
+	if a.Theme != custom || !a.dirty.Load() {
+		t.Fatal("SetTheme did not swap theme and invalidate")
+	}
+}

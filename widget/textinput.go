@@ -11,6 +11,9 @@ import (
 // TextInput is a single-line editable field (order size, limit price entry, symbol search). Editing allocates (Go strings are immutable); this is expected to be an infrequent, user-paced operation, unlike the market-data render path.
 // Border draws a visible frame around the field so it reads as an input rather than plain text - a single-row `[ like this ]` frame when area.H == 1 or 2 (the common case inside a Fix(...,1) layout slot), or a full titled box (Placeholder as the title) when given 3+ rows. Off by default to match every existing example exactly.
 type TextInput struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
 	FocusMixin
 	Placeholder string
 	Value       []rune
@@ -44,6 +47,9 @@ func (t *TextInput) contentArea(area geometry.Rect) geometry.Rect {
 }
 
 func (t *TextInput) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if t.ThemeOverride != nil {
+		theme = t.ThemeOverride
+	}
 	if area.H < 1 {
 		return
 	}

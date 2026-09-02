@@ -2,6 +2,7 @@ package widget
 
 import (
 	"github.com/ZeroGCDev/zerotui/buffer"
+	"github.com/ZeroGCDev/zerotui/color"
 	"github.com/ZeroGCDev/zerotui/geometry"
 	"github.com/ZeroGCDev/zerotui/input"
 	"github.com/ZeroGCDev/zerotui/style"
@@ -19,6 +20,10 @@ type Command struct {
 // subsequence-based and stores only indexes, so typing/searching does not
 // allocate on the steady-state path.
 type CommandPalette struct {
+	// ThemeOverride optionally replaces the application theme for this component only.
+	// It is a pointer to a caller-owned theme, so steady-state rendering adds no allocations.
+	ThemeOverride *style.Theme
+	Background    *color.Color // nil = theme.Panel
 	FocusMixin
 	Commands []Command
 	Query    string
@@ -33,6 +38,8 @@ func NewCommandPalette(commands []Command) *CommandPalette {
 	p.rebuildMatches()
 	return p
 }
+
+func (p *CommandPalette) OwnsBackground() bool { return p.Background != nil }
 
 func (p *CommandPalette) SetQuery(q string) { p.Query = q; p.rebuildMatches(); p.Selected = 0 }
 
@@ -75,16 +82,23 @@ func lowerASCII(b byte) byte {
 }
 
 func (p *CommandPalette) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme) {
+	if p.ThemeOverride != nil {
+		theme = p.ThemeOverride
+	}
 	if area.W < 8 || area.H < 4 {
 		return
 	}
 	if p.Query != p.lastQ {
 		p.rebuildMatches()
 	}
-	buffer.DrawBorder(buf, area.X, area.Y, area.W, area.H, " COMMAND PALETTE ", theme.BorderFocus, theme.Title, theme.Panel, true)
-	buf.SetString(area.X+2, area.Y+2, "> ", theme.Text)
-	buf.SetString(area.X+4, area.Y+2, p.Query, theme.Text)
-	buf.Set(area.X+4+len(p.Query), area.Y+2, '_', theme.Info)
+	fill := theme.Panel
+	if p.Background != nil {
+		fill = fill.WithBg(*p.Background)
+	}
+	buffer.DrawBorder(buf, area.X, area.Y, area.W, area.H, " COMMAND PALETTE ", theme.BorderFocus, theme.Title, fill, true)
+	buf.SetString(area.X+2, area.Y+2, "> ", bgOr(theme.Text, p.Background))
+	buf.SetString(area.X+4, area.Y+2, p.Query, bgOr(theme.Text, p.Background))
+	buf.Set(area.X+4+len(p.Query), area.Y+2, '_', bgOr(theme.Info, p.Background))
 	maxRows := area.H - 4
 	for row := 0; row < maxRows; row++ {
 		i := row
@@ -93,9 +107,9 @@ func (p *CommandPalette) Draw(buf *buffer.Buffer, area geometry.Rect, theme *sty
 			break
 		}
 		cmd := p.Commands[p.matches[i]]
-		st := theme.Text
+		st := bgOr(theme.Text, p.Background)
 		if i == p.Selected && p.focused {
-			st = theme.Selected
+			st = bgOr(theme.Selected, p.Background)
 		}
 		buf.FillRect(area.X+1, y, area.W-2, 1, ' ', st)
 		buf.SetString(area.X+3, y, cmd.Name, st)

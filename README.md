@@ -34,7 +34,7 @@ Layout primitives include:
 
 Interactive widgets implement the focus and mouse contracts used by `app.App`, so applications do not need to build a separate routing layer for every component.
 
-### Example 1:
+### Simple Example:
 
 ```go
 package main
@@ -76,11 +76,59 @@ func main() {
 
 <img width="1000" height="563" alt="Image" src="https://github.com/user-attachments/assets/212c333f-dc5b-47ad-85de-74ee5fe0e603" />
 
-### Example 2:
+### Examples:
 ```bash
 go run ./examples/dashboard
+go run ./examples/controls
 ```
  • Click `x` of each panel to close  • Use Mouse to Scroll •  Press `1` Controls  `2` Market  `3` Table to Reopening •  Drag the dividers to resize each Panel  • Press `q` Quit",
+ 
+### ThemeOverride
+
+ZeroTUI lets each rendered component opt into its own `*style.Theme` through `ThemeOverride`. A component theme controls the complete visual palette for that component: text/foreground colours, backgrounds, borders, focus state, selection, positive/negative/warning colours, titles and scrollbar roles. The application theme remains the default, so you only override the components that need a custom appearance.
+
+```go
+base := style.TokyoNightTheme()
+buttonTheme := *base
+buttonTheme.Positive = buttonTheme.Positive.WithFg(color.TokyoGreen)
+buttonTheme.Selected = buttonTheme.Selected.WithBg(color.TokyoBlue)
+
+button := widget.NewButton("RUN", run)
+button.ThemeOverride = &buttonTheme
+```
+Component typography can be controlled through the theme's foreground/background and terminal attributes such as `Bold`, `Dim`, `Underline`, `Reverse` and `Blink`.
+
+
+### Runtime theme switching
+
+```go
+a.SetTheme(style.NordTheme())
+```
+
+This is a visual change only. Existing component `ThemeOverride` values continue to take precedence for components that intentionally use their own palette.
+
+### Exact component dimensions
+
+Layout controls widget dimensions. `Flex` already supports fixed main-axis sizes with `Fix(...)` and flexible sizes with `Flex1(...)`/`FlexN(...)`. It now also supports optional `Item.Width` and `Item.Height` cross-axis constraints. For an explicit width and height, use `layout.FixedSize(...)`:
+
+```go
+layout.Fix(layout.FixedSize(layout.Wrap(button), 32, 3), 3)
+```
+
+`FixedSize` clamps to the available terminal area and centers the component. It is a layout-time operation and therefore does not add render-loop allocations.
+
+### Bounded component geometry
+
+```go
+root := layout.Padding(
+    layout.SizeBounds(layout.Wrap(card), 30, 60, 6, 12),
+    2, 1, 2, 1,
+)
+```
+
+This keeps sizing concerns in the layout layer instead of making widgets perform geometry work during every draw.
+
+
 ### Rendering architecture
 
 ZeroTUI uses four cooperating layers:

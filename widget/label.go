@@ -52,5 +52,31 @@ func (l *Label) Draw(buf *buffer.Buffer, area geometry.Rect, theme *style.Theme)
 	if l.TextFn != nil {
 		text = l.TextFn()
 	}
-	buf.SetString(area.X, area.Y, text, st)
+
+	// Labels are commonly used for compact blocks of copy in examples and
+	// dashboards. SetString intentionally treats a string as one terminal row,
+	// so do the line walking here instead of ever writing a literal newline into
+	// the cell buffer. A newline stored in a cell would be emitted as an ANSI
+	// control character by the terminal renderer and could move the real cursor
+	// away from the buffer's tracked position, producing missing widgets and
+	// stray horizontal/vertical lines.
+	row := area.Y
+	col := area.X
+	for _, r := range text {
+		if row >= area.Y+area.H {
+			break
+		}
+		if r == '\n' {
+			row++
+			col = area.X
+			continue
+		}
+		if col >= area.X+area.W {
+			continue
+		}
+		if col >= area.X {
+			buf.Set(col, row, r, st)
+		}
+		col++
+	}
 }

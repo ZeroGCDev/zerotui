@@ -590,6 +590,27 @@ func (a *App) addPlacementDamageLocked(pi int, regionScratch []geometry.Rect) {
 	a.addDamageLocked(p.Area, true)
 }
 
+func intersectRect(a, b geometry.Rect) geometry.Rect {
+	x1, y1 := a.X, a.Y
+	if b.X > x1 {
+		x1 = b.X
+	}
+	if b.Y > y1 {
+		y1 = b.Y
+	}
+	x2, y2 := a.X+a.W, a.Y+a.H
+	if b.X+b.W < x2 {
+		x2 = b.X + b.W
+	}
+	if b.Y+b.H < y2 {
+		y2 = b.Y + b.H
+	}
+	if x2 <= x1 || y2 <= y1 {
+		return geometry.Rect{}
+	}
+	return geometry.Rect{X: x1, Y: y1, W: x2 - x1, H: y2 - y1}
+}
+
 func sameWidget(a, b widget.Widget) bool {
 	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
 	if !va.IsValid() || !vb.IsValid() || va.Type() != vb.Type() || !va.Type().Comparable() {
@@ -805,7 +826,13 @@ func (a *App) drawTo(out io.Writer) {
 	if full || n == 0 {
 		a.buf.Clear(a.Theme.Background)
 		for i, p := range a.placements {
+			// Every placement owns a rectangular paint region. Keep widget drawing
+			// inside that region so fixed-width content (tables, lists, labels,
+			// etc.) cannot spill into a neighbouring panel when the terminal is
+			// resized or a responsive layout becomes compact.
+			a.buf.SetClip(buffer.Rect{X: p.Area.X, Y: p.Area.Y, W: p.Area.W, H: p.Area.H})
 			p.Widget.Draw(a.buf, p.Area, a.Theme)
+			a.buf.ClearClip()
 			if provider, ok := p.Widget.(widget.DirtyRegionProvider); ok {
 				// A full frame supersedes any provider-local pending damage. Consume
 				// it now so the next market-data tick can stay row-local.
@@ -870,7 +897,18 @@ func (a *App) drawTo(out io.Writer) {
 		for ci := start; ci < len(candidates); ci++ {
 			pi := candidates[ci]
 			p := a.placements[pi]
+			// Partial redraws must clip to the intersection of the damage region
+			// and the placement. Replaying an opaque parent (for example a panel
+			// border) is necessary to restore its background, but allowing that
+			// parent to paint its entire placement would erase sibling/child widgets
+			// outside the damaged rows.
+			clip := intersectRect(gr, p.Area)
+			if clip.W <= 0 || clip.H <= 0 {
+				continue
+			}
+			a.buf.SetClip(buffer.Rect{X: clip.X, Y: clip.Y, W: clip.W, H: clip.H})
 			p.Widget.Draw(a.buf, p.Area, a.Theme)
+			a.buf.ClearClip()
 			partialPainted++
 			if pi < len(a.placementState) {
 				a.placementState[pi].flags = DirtyNone

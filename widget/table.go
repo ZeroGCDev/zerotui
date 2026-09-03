@@ -135,30 +135,86 @@ func resolveColumnWidths(columns []Column, total int, cache []int) []int {
 	if len(cache) != len(columns) {
 		cache = make([]int, len(columns))
 	}
-	used, flex, weightTotal, lastFlex := 0, 0, 0, -1
-	for i, c := range columns {
+	if len(columns) == 0 {
+		return cache[:0]
+	}
+
+	// One cell is reserved between adjacent columns. Fixed widths are preferred,
+	// but they must not make a table wider than the rectangle it was given. This
+	// is important for responsive UIs: a 30-cell column should shrink on a small
+	// terminal instead of painting through the next panel.
+	separators := len(columns) - 1
+	content := total - separators
+	if content < len(columns) {
+		content = len(columns)
+	}
+
+	fixedSum := 0
+	flexCount, weightTotal := 0, 0
+	for _, c := range columns {
 		if c.Width > 0 {
-			cache[i] = c.Width
-			used += c.Width + 1
+			fixedSum += c.Width
 			continue
 		}
+		flexCount++
 		w := c.Weight
 		if w <= 0 {
 			w = 1
 		}
-		cache[i] = 0
-		flex++
 		weightTotal += w
-		lastFlex = i
 	}
-	if flex == 0 {
+
+	// Allocate fixed columns first. If they do not fit, shrink them
+	// proportionally while keeping at least one cell for each column.
+	fixedBudget := fixedSum
+	if fixedBudget > content {
+		fixedBudget = content
+	}
+	fixedAllocated := 0
+	if fixedSum > 0 {
+		for i, c := range columns {
+			if c.Width <= 0 {
+				cache[i] = 0
+				continue
+			}
+			w := c.Width
+			if fixedSum > content {
+				w = c.Width * fixedBudget / fixedSum
+				if w < 1 {
+					w = 1
+				}
+			}
+			cache[i] = w
+			fixedAllocated += w
+		}
+		// Rounding can leave a few cells undistributed. Give them to the widest
+		// fixed columns so the table uses the available width exactly.
+		for fixedAllocated < fixedBudget {
+			best := -1
+			bestWidth := -1
+			for i, c := range columns {
+				if c.Width > 0 && cache[i] > bestWidth {
+					best, bestWidth = i, cache[i]
+				}
+			}
+			if best < 0 {
+				break
+			}
+			cache[best]++
+			fixedAllocated++
+		}
+	}
+
+	remaining := content - fixedAllocated
+	if flexCount == 0 {
 		return cache
 	}
-	remaining := total - used - (flex - 1)
-	if remaining < flex*4 {
-		remaining = flex * 4
+	if remaining < flexCount {
+		remaining = flexCount
 	}
+
 	allocated := 0
+	lastFlex := -1
 	for i, c := range columns {
 		if c.Width > 0 {
 			continue
@@ -168,17 +224,19 @@ func resolveColumnWidths(columns []Column, total int, cache []int) []int {
 			w = 1
 		}
 		width := remaining * w / weightTotal
-		if width < 4 {
-			width = 4
-		}
-		if i == lastFlex {
-			width = remaining - allocated
-		}
 		if width < 1 {
 			width = 1
 		}
 		cache[i] = width
 		allocated += width
+		lastFlex = i
+	}
+	// Correct integer rounding on the last flexible column.
+	if lastFlex >= 0 && allocated != remaining {
+		cache[lastFlex] += remaining - allocated
+		if cache[lastFlex] < 1 {
+			cache[lastFlex] = 1
+		}
 	}
 	return cache
 }

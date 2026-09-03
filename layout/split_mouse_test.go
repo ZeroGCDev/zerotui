@@ -34,3 +34,15 @@ func TestSplitResizeHandleDragChangesRatio(t *testing.T) {
 		t.Fatalf("ratio=%v outside clamp", s.Ratio)
 	}
 }
+
+func TestSplitRepeatedResizePreservesConfiguredRatio(t *testing.T) {
+	s := NewSplit(Horizontal, Wrap(&testWidget{}), Wrap(&testWidget{}), 0.70)
+	want := 0.70
+	sizes := []int{100, 120, 80, 140, 95, 160, 110, 100}
+	for _, width := range sizes {
+		s.Compute(geometry.Rect{X: 0, Y: 0, W: width, H: 20})
+		if s.Ratio != want {
+			t.Fatalf("width=%d changed logical ratio to %.12f; want %.12f", width, s.Ratio, want)
+		}
+	}
+}

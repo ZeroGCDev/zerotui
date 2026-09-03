@@ -106,6 +106,12 @@ func main() {
 	)
 
 	spark := widget.NewSparkline(200)
+	// Seed the chart so the dashboard shows a useful sparkline immediately,
+	// before the first live market tick arrives.
+	for i := 0; i < 80; i++ {
+		phase := float64(i % 16)
+		spark.Push(78900 + phase*2.5)
+	}
 
 	book := widget.NewOrderBook(
 		9, // price decimals
@@ -115,8 +121,8 @@ func main() {
 
 	metricsBody := layout.NewFlex(
 		layout.Vertical,
-		layout.Fix(layout.Wrap(ticker), 1),
-		layout.Fix(layout.Wrap(spark), 1),
+		layout.Fix(layout.Wrap(ticker), 2),
+		layout.Fix(layout.Wrap(spark), 3),
 		layout.Flex1(layout.Wrap(book)),
 	)
 

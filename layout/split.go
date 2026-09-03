@@ -96,7 +96,9 @@ func (s *Split) ComputeInto(area geometry.Rect, out []Placement) []Placement {
 		first = 0
 	}
 	second := avail - first
-	s.Ratio = float64(first) / float64(avail)
+	// Keep Ratio as the user-selected logical proportion. Do not overwrite it
+	// with the integer-rounded geometry ratio: doing so causes repeated terminal
+	// resizes to accumulate rounding error and slowly collapse the first pane.
 
 	if s.Dir == Horizontal {
 		a := geometry.Rect{X: area.X, Y: area.Y, W: first, H: area.H}

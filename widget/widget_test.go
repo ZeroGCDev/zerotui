@@ -430,3 +430,51 @@ func TestVirtualTableSelectionDamageIsFullBody(t *testing.T) {
 		t.Fatalf("damage=%v want one full body region", got)
 	}
 }
+
+func TestLabelMultilineStaysInsideCellBuffer(t *testing.T) {
+	buf := buffer.New(20, 5)
+	theme := style.TokyoNightTheme()
+	l := NewLabel("one\ntwo\nthree")
+	l.Draw(buf, geometry.Rect{X: 2, Y: 1, W: 10, H: 3}, theme)
+
+	want := []string{"one", "two", "three"}
+	for row, line := range want {
+		for col, ch := range line {
+			if got := buf.CellAt(2+col, 1+row).Ch; got != ch {
+				t.Fatalf("cell (%d,%d) = %q, want %q", 2+col, 1+row, got, ch)
+			}
+		}
+	}
+	for y := 0; y < buf.H; y++ {
+		for x := 0; x < buf.W; x++ {
+			if buf.CellAt(x, y).Ch == '\n' {
+				t.Fatalf("literal newline leaked into buffer at (%d,%d)", x, y)
+			}
+		}
+	}
+}
+
+func TestTableColumnsFitNarrowArea(t *testing.T) {
+	buf := buffer.New(44, 6)
+	theme := style.TokyoNightTheme()
+	table := NewTable([]Column{
+		{Title: "TASK", Width: 30},
+		{Title: "OWNER", Width: 12},
+		{Title: "STATUS", Width: 12},
+	})
+	table.Rows = [][]string{{"Landing page", "Maya", "IN REVIEW"}}
+	area := geometry.Rect{X: 0, Y: 0, W: 44, H: 6}
+	table.Draw(buf, area, theme)
+
+	// The final column must remain inside the table rectangle even though the
+	// requested fixed widths (30+12+12 plus separators) are wider than 44 cells.
+	for x := 0; x < 44; x++ {
+		_ = buf.CellAt(x, 0)
+	}
+	if got := buf.CellAt(43, 1).Ch; got == 0 {
+		t.Fatalf("table failed to paint the final in-bounds cell")
+	}
+	if got := buf.CellAt(44, 1).Ch; got != 0 {
+		t.Fatalf("table painted outside its area at x=44: %q", got)
+	}
+}

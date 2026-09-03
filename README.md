@@ -8,6 +8,29 @@ The core idea is simple: update data frequently, repaint only what changed, and 
 
 Many terminal applications spend far more work rebuilding text than the user can actually see changing. ZeroTUI takes a different approach: widgets draw into a retained cell buffer, the compositor tracks damage, and the terminal writer emits only changed cells.
 
+**ZeroTUI was tested against Bubble Tea v2 + Lip Gloss v2 and Ratatui using the same HFT-style workload: a 1,000 logical-tick/sec target, 60 FPS rendering ceiling, 120×45 terminal, 19 visible table rows, 20- and 500-row datasets, and both realistic and worst-density updates.**
+
+**Intel Xeon E312xx (Sandy Bridge, IBRS update)** killercoda Ubuntu 24.04.
+
+Sustained test limits: **4 CPUs / 2 GB RAM**
+
+Go 1.27.1 Rust 1.98.0 ZeroTUI v1.0.1 Bubble Tea v2.0.9 Lip Gloss v2.0.6 Ratatui v0.30.2
+
+| Metric | ZeroTUI (Go) | Bubble Tea v2 (Go) | Ratatui (Rust) |
+| --- | --- | --- | --- |
+| **Sustained Ticks/sec** *(Realistic)* | ~930 | ~911 | **1,000** |
+| **Allocation Rate** *(Realistic)* | **30–32 KB/s** | 25 MB/s | 7.6 MB/s |
+| **Allocation Rate** *(Worst Case)* | 14.97 MB/s | 51.29 MB/s | **14.83 MB/s** |
+| **Full-Frame Render Latency** | **~54.7 µs** | ~69.9 µs | ~195.1 µs |
+| **Go GC Cycles** *(Realistic)* | **0** | >0 | N/A |
+
+* **Throughput:** Ratatui achieves the highest sustained market-tick throughput (**1,000** ticks/sec), followed by ZeroTUI (**~930**) and Bubble Tea (**~911**).
+* **Memory Allocations:** ZeroTUI generates **99.6%–99.9% less allocation traffic** in realistic tests (30–32 KB/s vs. Ratatui's 7.6 MB/s and Bubble Tea's 25 MB/s), triggering zero GC cycles. In worst-case 500-row updates, ZeroTUI **(14.97 MB/s)** closely tracks Ratatui **(14.83 MB/s)** and uses 70.8% less allocation memory than Bubble Tea **(51.29 MB/s)**.
+* **Render Latency:** ZeroTUI's full-frame rendering (~54.7 µs) is **22% faster** than Bubble Tea (~69.9 µs) and **72% faster** than Ratatui (~195.1 µs).
+
+While Ratatui holds the throughput edge, ZeroTUI eliminates garbage collection pauses by minimizing memory allocation during continuous partial terminal updates.
+
+
 ## Table of contents
 
 - [Features](#features)
@@ -2531,6 +2554,317 @@ This is one of the important reasons to use ZeroTUI for applications with freque
 
 > **Benchmark note:** These numbers are measurements of ZeroTUI on the hardware and software listed above, not guarantees of application-level performance. Use them as an indication of the library's overhead rather than a promise of a specific FPS or latency on every machine.
 
+</details>
+
+<details open>
+<summary><strong>This benchmark compares ZeroTUI, Bubble Tea v2 + Lip Gloss v2, and Ratatui using an HFT-style terminal dashboard workload: </strong></summary>
+
+### What Was Benchmarked?
+
+Three terminal UI implementations were compared:
+
+| Framework | Language | Version |
+|---|---|---|
+| **ZeroTUI** | Go | v1.0.1 |
+| **Bubble Tea + Lip Gloss** | Go | Bubble Tea v2.0.9 / Lip Gloss v2.0.6 |
+| **Ratatui** | Rust | v0.30.2 |
+
+The recorded run used:
+
+- **4 CPU cores**
+- **2 GB memory limit**
+- **30-second sustained tests**
+- **1,000 logical market ticks/second target**
+- **60 FPS maximum rendering cadence**
+- **120 × 45 terminal**
+- **19 visible table data rows**
+- **20-row dataset**
+- **500-row dataset**
+- **Realistic density:** one row changes per logical tick
+- **Worst density:** every row changes during each logical tick
+
+The same deterministic tick fixture was replayed by all three implementations.
+
+### Why Two Types of Tests?
+ Layer 1 — Microbenchmarks
+
+This isolates individual pieces of work:
+
+- state mutation
+- frame rendering
+- ZeroTUI sparse/retained rendering
+- ZeroTUI full-frame rendering
+- ZeroTUI order-book processing
+
+This tells us where CPU and allocation work occurs.
+
+ Layer 2 — Sustained End-to-End Test
+
+This runs the complete terminal application for 30 seconds:
+
+**market updates → state changes → queued/batched updates → rendering → terminal output**
+
+This is the most relevant test for the question:
+
+> "What happens when I build a continuously updating terminal application?"
+
+The benchmark explicitly separates state mutation from rendering in Layer 1 and treats the sustained run as the end-to-end HFT-style test.
+
+### Realistic vs Worst-Density
+
+Realistic
+
+**1 row changes per logical tick.**
+
+This represents continuous market activity where each update affects only a small part of the displayed data.
+
+Worst density
+
+Every row in the dataset changes during each logical tick:
+
+- 20-row dataset → 20 row mutations/tick
+- 500-row dataset → 500 row mutations/tick
+
+The render cadence remains capped at 60 FPS.
+
+This asks:
+
+> "What happens when a very large amount of the application's data changes at once?"
+
+### Sustained Tick Throughput
+
+| Framework | Dataset | Realistic | Worst density |
+|---|---:|---:|---:|
+| **ZeroTUI** | 20 rows | **931.3/s** | **934.1/s** |
+| **ZeroTUI** | 500 rows | **929.5/s** | **935.5/s** |
+| **Bubble Tea** | 20 rows | **903.3/s** | *18,103/s* |
+| **Bubble Tea** | 500 rows | **911.1/s** | *427,321/s* |
+| **Ratatui** | 20 rows | **999.5/s** | **999.6/s** |
+| **Ratatui** | 500 rows | **1,000.1/s** | **1,000.5/s** |
+
+
+
+ Important note about Bubble Tea's worst-density numbers
+
+The very high Bubble Tea worst-density tick counts should **not** be interpreted as Bubble Tea suddenly processing 427,000 ordinary market ticks/sec.
+
+Those counters have different internal work/counting behavior in that stress case and are not a safe apples-to-apples comparison with the roughly 1,000 logical-tick target.
+
+For cross-framework tick throughput, the **realistic-density numbers are the safest comparison**.
+
+### Tick Throughput — Percentage Differences
+
+#### 20-row realistic workload
+
+- Ratatui: **999.5 ticks/sec**
+- ZeroTUI: **931.3 ticks/sec**
+- Bubble Tea: **903.3 ticks/sec**
+
+Compared with ZeroTUI:
+
+| Comparison | Difference |
+|---|---:|
+| Ratatui vs ZeroTUI | **+7.3%** |
+| ZeroTUI vs Bubble Tea | **+3.1%** |
+| Ratatui vs Bubble Tea | **+10.7%** |
+
+So Ratatui processed about **7% more realistic logical ticks/sec** than ZeroTUI.
+
+ZeroTUI processed about **3% more** than Bubble Tea.
+
+#### 500-row realistic workload
+
+- Ratatui: **1,000.1 ticks/sec**
+- ZeroTUI: **929.5 ticks/sec**
+- Bubble Tea: **911.1 ticks/sec**
+
+| Comparison | Difference |
+|---|---:|
+| Ratatui vs ZeroTUI | **+7.6%** |
+| ZeroTUI vs Bubble Tea | **+2.0%** |
+| Ratatui vs Bubble Tea | **+9.8%** |
+
+ Meaning
+
+Ratatui was the strongest sustained tick processor in this run.
+
+ZeroTUI was slightly ahead of Bubble Tea, but the raw throughput difference was relatively small.
+
+Therefore the benchmark does **not** support saying that ZeroTUI has the highest raw sustained throughput.
+
+### The Biggest Difference: Allocation
+
+During the sustained realistic workload:
+
+| Framework | 20 rows | 500 rows |
+|---|---:|---:|
+| **ZeroTUI** | **31,963 B/sec** | **30,412 B/sec** |
+| **Bubble Tea** | **25,007,908 B/sec** | **25,005,653 B/sec** |
+| **Ratatui** | **7,581,639 B/sec** | **7,568,524 B/sec** |
+
+
+Approximate human-readable rates:
+
+| Framework | Allocation/sec | Allocation/min |
+|---|---:|---:|
+| **ZeroTUI** | **31 KB/s** | **1.9 MB/min** |
+| **Ratatui** | **7.6 MB/s** | **455 MB/min** |
+| **Bubble Tea** | **25 MB/s** | **1.5 GB/min** |
+
+These figures are **allocation traffic**, not the amount of RAM permanently retained by the process.
+
+### Headless State Mutation
+
+The isolated state-mutation measurements were approximately:
+
+| Framework | 20-row state mutation |
+|---|---:|
+| ZeroTUI | **326 ns** |
+| Bubble Tea | **295 ns** |
+| Ratatui | **170 ns** |
+
+ Percentage interpretation
+
+Using the measured central values:
+
+- Ratatui was approximately **48% faster** than ZeroTUI for this isolated state-mutation test.
+- Bubble Tea was approximately **10% faster** than ZeroTUI.
+
+So ZeroTUI does **not** win this test.
+
+That is expected: state mutation is only one part of a complete terminal UI.
+
+### Full-Frame Rendering
+
+For the 20-row dashboard, approximate measured frame times were:
+
+| Framework | Frame time |
+|---|---:|
+| **ZeroTUI** | **~54.7 µs** |
+| **Bubble Tea** | **~69.9 µs** |
+| **Ratatui** | **~195.1 µs** |
+
+Lower is better.
+
+Compared with ZeroTUI:
+
+- ZeroTUI's measured frame time was approximately **22% lower than Bubble Tea**.
+- ZeroTUI's measured frame time was approximately **72% lower than Ratatui**.
+
+In simple terms:
+
+> In this isolated dashboard rendering test, ZeroTUI completed a full-frame render in less measured time.
+
+### ZeroTUI Sparse Rendering
+
+ZeroTUI also measured a sparse/retained rendering path.
+
+The result was approximately:
+
+**57 ns/op**
+
+with:
+
+- **0 B/op**
+- **0 allocations/op**
+
+The 500-row version was similarly around **56 ns/op**.
+
+This represents a situation where only a small region of the UI needs to be considered dirty rather than rebuilding the complete visual representation.
+
+There is no directly equivalent Bubble Tea or Ratatui sparse-rendering measurement in this benchmark, so **no percentage comparison should be made here**.
+
+The safe claim is:
+
+> ZeroTUI's measured sparse-rendering path produced zero allocations in this benchmark.
+
+### ZeroTUI Order-Book Benchmark
+
+ZeroTUI also exercised an order-book-style workload.
+
+Approximate results:
+
+| Order-book size | Processing time |
+|---:|---:|
+| 10 | **~3.4 µs** |
+| 25 | **~8.4 µs** |
+| 50 | **~16.2 µs** |
+| 100 | **~19.4 µs** |
+
+All reported:
+
+**0 B/op — 0 allocations/op**
+
+The recorded benchmark did not provide directly equivalent order-book microbenchmarks for Bubble Tea and Ratatui, so these are **ZeroTUI measurements, not a three-way comparison**.
+
+### 20 Rows vs 500 Rows
+
+The visible terminal viewport stayed the same:
+
+**19 visible data rows**
+
+The dataset behind that viewport changed:
+
+- 20 total rows
+- 500 total rows
+
+This means the 500-row test does not simply get a physically larger screen.
+
+### Realistic allocation
+
+ZeroTUI:
+
+- 20 rows → **31,963 B/sec**
+- 500 rows → **30,412 B/sec**
+
+That is only about a **5% difference**, and the 500-row run was slightly lower in this measurement.
+
+This suggests that in the realistic one-row-change workload, increasing the underlying dataset from 20 to 500 rows did not cause ZeroTUI's allocation traffic to grow proportionally with the dataset.
+
+##  Overall Comparison
+
+| Area | Result | Meaning |
+|---|---|---|
+| Realistic sustained tick throughput | **Ratatui** | Best raw sustained logical-tick rate |
+| Realistic tick throughput vs Bubble Tea | **ZeroTUI** | About 2–3% ahead |
+| Realistic sustained allocation | **ZeroTUI** | Dramatically lower allocation traffic |
+| Realistic Go GC activity | **ZeroTUI** | No GC cycles observed in the 30-second runs |
+| Full-frame microbenchmark | **ZeroTUI** | Lowest measured frame time in this test |
+| Sparse retained rendering | **ZeroTUI** | ~0 allocation in measured sparse path |
+| State mutation microbenchmark | **Ratatui** | Lowest isolated state-mutation time |
+| Extreme 500-row allocation | **Ratatui ≈ ZeroTUI** | Allocation rates were very close |
+| Extreme 500-row allocation vs Bubble Tea | **ZeroTUI/Ratatui** | Both substantially lower than Bubble Tea |
+
+# What This Benchmark Does NOT Prove
+
+The benchmark does **not** prove that:
+
+- ZeroTUI is the fastest TUI library for every workload.
+- ZeroTUI always uses less memory than Ratatui.
+- ZeroTUI is always faster than Bubble Tea.
+- ZeroTUI can process unlimited market data.
+- one machine's benchmark represents every user's machine.
+- allocation rate is the same thing as resident memory usage.
+- Bubble Tea's extreme worst-density tick number represents ordinary market ticks/sec.
+- ZeroTUI's isolated microbenchmarks automatically represent whole-application performance.
+
+The results are specific to the tested workload, machine, versions, terminal geometry, and benchmark implementation.
+
+## Benchmark Environment
+
+Recorded dependency versions:
+
+- Go **1.27.1**
+- Rust **1.98.0**
+- ZeroTUI **v1.0.1**
+- Bubble Tea **v2.0.9**
+- Lip Gloss **v2.0.6**
+- Ratatui **v0.30.2**
+
+Hardware reported by the Go microbenchmarks:
+
+**Intel Xeon E312xx (Sandy Bridge, IBRS update)** killercoda Ubuntu 24.04
+Sustained test limits: **4 CPUs / 2 GB RAM**
 </details>
 
 ## License

@@ -1,0 +1,201 @@
+package layout
+
+import "github.com/ZeroGCDev/zerotui/geometry"
+
+type Direction uint8
+
+const (
+	Horizontal Direction = iota
+	Vertical
+)
+
+// Item is one child of a Flex: either a fixed cell size or, if Size==0, a share of the remaining space proportional to Weight (default weight 1).
+type Item struct {
+	Node   Node
+	Size   int // main-axis fixed size in cells; 0 = flexible
+	Weight int // used when Size==0; 0 treated as 1
+	Width  int // optional cross/main override in cells; <=0 = parent width
+	Height int // optional cross/main override in cells; <=0 = parent height
+}
+
+func Fix(n Node, size int) Item     { return Item{Node: n, Size: size} }
+func Flex1(n Node) Item             { return Item{Node: n, Weight: 1} }
+func FlexN(n Node, weight int) Item { return Item{Node: n, Weight: weight} }
+
+// FlexBox arranges Items in a row or column, giving fixed items their exact size and dividing whatever remains among flexible items by weight. A 1-cell gap is left between items when Gap is left at its default (0 disables the gap explicitly via NoGap).
+type FlexBox struct {
+	Dir   Direction
+	Items []Item
+	Gap   int
+}
+
+func NewFlex(dir Direction, items ...Item) *FlexBox {
+	return &FlexBox{Dir: dir, Items: items, Gap: 1}
+}
+
+func (f *FlexBox) Visible() bool {
+	for _, it := range f.Items {
+		if it.Node != nil && isVisible(it.Node) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *FlexBox) Compute(area geometry.Rect) []Placement {
+	return f.ComputeInto(area, nil)
+}
+
+func isVisible(n Node) bool {
+	if v, ok := n.(VisibilityNode); ok {
+		return v.Visible()
+	}
+	return true
+}
+
+func (f *FlexBox) ComputeInto(area geometry.Rect, out []Placement) []Placement {
+	// Count only visible direct children. Closed panels therefore give their
+	// cells back to siblings without rebuilding the layout tree.
+	visible := 0
+	for _, it := range f.Items {
+		if it.Node != nil && isVisible(it.Node) {
+			visible++
+		}
+	}
+	if visible == 0 {
+		return out
+	}
+
+	main := area.W
+	if f.Dir == Vertical {
+		main = area.H
+	}
+	gapTotal := f.Gap * (visible - 1)
+	fixedTotal, fitTotal, weightTotal := 0, 0, 0
+	for _, it := range f.Items {
+		if it.Node == nil || !isVisible(it.Node) {
+			continue
+		}
+		if it.Size > 0 {
+			fixedTotal += it.Size
+			continue
+		}
+		// Intrinsic sizing is explicit. Only FitHeight participates; a widget
+		// merely implementing PreferredHeight does not change normal Flex1/FlexN.
+		if f.Dir == Vertical {
+			if fh, ok := it.Node.(preferredHeightConstraint); ok {
+				if h := fh.layoutPreferredHeight(); h > 0 {
+					fitTotal += h
+					continue
+				}
+			}
+		}
+		w := it.Weight
+		if w <= 0 {
+			w = 1
+		}
+		weightTotal += w
+	}
+
+	available := main - fixedTotal - gapTotal
+	if available < 0 {
+		available = 0
+	}
+	fixedBudget := fixedTotal
+	if fixedBudget > main-gapTotal {
+		fixedBudget = main - gapTotal
+		if fixedBudget < 0 {
+			fixedBudget = 0
+		}
+	}
+
+	// Fitted children get their intrinsic height when it fits. If the terminal
+	// is too small, their heights are reduced proportionally rather than letting
+	// the first child consume all remaining space and starving later siblings.
+	fitBudget := available
+	if fitTotal < fitBudget {
+		fitBudget = fitTotal
+	}
+	remaining := available - fitBudget
+	if remaining < 0 {
+		remaining = 0
+	}
+	if weightTotal == 0 {
+		weightTotal = 1
+	}
+
+	pos := 0
+	emitted := 0
+	fitCumulative := 0
+	fixedCumulative := 0
+	for _, it := range f.Items {
+		if it.Node == nil || !isVisible(it.Node) {
+			continue
+		}
+
+		size := it.Size
+		if size > 0 && fixedTotal > fixedBudget {
+			prev := fixedCumulative
+			fixedCumulative += it.Size
+			size = (fixedCumulative*fixedBudget)/fixedTotal - (prev*fixedBudget)/fixedTotal
+		} else if size > 0 {
+			fixedCumulative += size
+		}
+		if size == 0 && f.Dir == Vertical {
+			if fh, ok := it.Node.(preferredHeightConstraint); ok {
+				if preferred := fh.layoutPreferredHeight(); preferred > 0 {
+					prev := fitCumulative
+					fitCumulative += preferred
+					if fitTotal <= fitBudget {
+						size = preferred
+					} else {
+						// Difference-of-floors gives an exact integer partition of
+						// fitBudget while distributing rounding error across children.
+						size = (fitCumulative*fitBudget)/fitTotal - (prev*fitBudget)/fitTotal
+					}
+				}
+			}
+		}
+		if size == 0 {
+			w := it.Weight
+			if w <= 0 {
+				w = 1
+			}
+			size = remaining * w / weightTotal
+		}
+
+		var childArea geometry.Rect
+		if f.Dir == Horizontal {
+			childArea = geometry.Rect{X: area.X + pos, Y: area.Y, W: size, H: area.H}
+			if it.Width > 0 && it.Width < childArea.W {
+				childArea.X += (childArea.W - it.Width) / 2
+				childArea.W = it.Width
+			}
+			if it.Height > 0 && it.Height < childArea.H {
+				childArea.Y += (childArea.H - it.Height) / 2
+				childArea.H = it.Height
+			}
+		} else {
+			childArea = geometry.Rect{X: area.X, Y: area.Y + pos, W: area.W, H: size}
+			if it.Width > 0 && it.Width < childArea.W {
+				childArea.X += (childArea.W - it.Width) / 2
+				childArea.W = it.Width
+			}
+			if it.Height > 0 && it.Height < childArea.H {
+				childArea.Y += (childArea.H - it.Height) / 2
+				childArea.H = it.Height
+			}
+		}
+		if r, ok := it.Node.(ReusableNode); ok {
+			out = r.ComputeInto(childArea, out)
+		} else {
+			out = append(out, it.Node.Compute(childArea)...)
+		}
+		emitted++
+		pos += size
+		if emitted < visible {
+			pos += f.Gap
+		}
+	}
+	return out
+}

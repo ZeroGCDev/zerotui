@@ -6,10 +6,16 @@ import (
 	"time"
 
 	"github.com/ZeroGCDev/zerotui/app"
+	"github.com/ZeroGCDev/zerotui/color"
 	"github.com/ZeroGCDev/zerotui/input"
 	"github.com/ZeroGCDev/zerotui/layout"
 	"github.com/ZeroGCDev/zerotui/style"
 	"github.com/ZeroGCDev/zerotui/widget"
+)
+
+const (
+	heatWorkers = 6
+	heatBuckets = 36
 )
 
 func main() {
@@ -37,6 +43,22 @@ func main() {
 	status := widget.NewStat("DEPLOYMENT", "RUNNING")
 	status.Delta = "2m 14s"
 
+	// A rolling per-worker load matrix: one row per worker, one column per
+	// 700ms tick over the last heatBuckets ticks. Cool-to-hot coloring makes
+	// a hot worker jump out without reading any numbers.
+	heat := widget.NewHeatmap(heatBuckets, heatWorkers, 0, 100)
+	heat.Low, heat.High = color.NordCyan, color.NordRed
+	heat.CellWidth = 2
+	history := make([][]float64, heatWorkers)
+	for w := range history {
+		history[w] = make([]float64, heatBuckets)
+		for b := range history[w] {
+			history[w][b] = 30
+		}
+		heat.SetRow(w, history[w])
+	}
+	heatPanel := layout.BorderedRounded("WORKER LOAD", layout.Wrap(heat), nil)
+
 	side := layout.BorderedRounded("SERVICE STATUS", layout.NewFlex(
 		layout.Vertical,
 		layout.Fix(layout.Wrap(widget.NewBadge("PRODUCTION")), 1),
@@ -47,11 +69,15 @@ func main() {
 	), nil)
 
 	main := layout.BorderedRounded("LIVE LOGS", layout.Wrap(logs), func() bool { return logs.IsFocused() })
+	body := layout.NewFlex(layout.Vertical,
+		layout.Flex1(main),
+		layout.Fix(heatPanel, heatWorkers+2), // +2 for the panel's own border
+	)
 	paletteOverlay := layout.NewOverlay(
 		func() bool { return paletteVisible },
 		layout.Center(layout.Wrap(palette), .62, .72),
 	)
-	stack := layout.NewStack(main, paletteOverlay)
+	stack := layout.NewStack(body, paletteOverlay)
 
 	root := layout.NewFlex(layout.Vertical,
 		layout.Fix(layout.Wrap(widget.NewLabel("  OBSERVABILITY • CONTROL ROOM")), 1),
@@ -90,8 +116,23 @@ func main() {
 				code = 503
 			}
 			logs.Append(fmt.Sprintf("live event %04d  %s  status=%d  queue=%02d%%", i, msg, code, queue))
+
+			// Scroll the load matrix left by one tick and append a fresh
+			// reading per worker, then republish only the changed rows.
+			for w := range history {
+				copy(history[w], history[w][1:])
+				next := history[w][heatBuckets-2] + float64(rng.Intn(21)-10)
+				if next < 5 {
+					next = 5
+				} else if next > 98 {
+					next = 98
+				}
+				history[w][heatBuckets-1] = next
+				heat.SetRow(w, history[w])
+			}
+
 			a.BeginBatch()
-			a.InvalidateWidgets(logs, gauge, status)
+			a.InvalidateWidgets(logs, gauge, status, heat)
 			a.EndBatch()
 		}
 	}()

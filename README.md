@@ -262,7 +262,7 @@ func main() {
 
 | Widgets | Layout primitives |
 |---|---|
-| `Label` · `Button` · `Toggle` · `Slider` · `Gauge` · `Sparkline` · `PriceTicker` · `OrderBook` · `Table` · `VirtualTable` · `VirtualList` · `List` · `Tabs` · `TextInput` · `FastLogView` · `CommandPalette` · `Badge` · `Divider` · `Stat` · `Spinner` · `GradientBar` · `ScrollBar` · `ResizeHandle` · `CloseButton` · `Terminal` · `TextEditor` · `CodeEditor` · `TreeView` · `FilePicker` · `ShortcutHelpBar` · `TimeAndSales` · `PositionList` · `PositionPanel` · `Orders` · `PnL` · `LatencyMonitor` · `RiskMonitor` · `MarketStatus` · `OrderEntry` | `Flex` · `Grid` · `Split` · `FixedSize` · `SizeBounds` · `Padding` · `Stack` · `Overlay` · `Modal` · `Center` · `Bordered` · `BorderedRounded` · `ClosableRounded` · `Responsive` · `Retained` · `FitHeight` · `Wrap` |
+| `Label` · `Button` · `Toggle` · `Slider` · `Gauge` · `Sparkline` · `Heatmap` · `PriceTicker` · `OrderBook` · `Table` · `VirtualTable` · `VirtualList` · `List` · `Tabs` · `TextInput` · `FastLogView` · `CommandPalette` · `Badge` · `Divider` · `Stat` · `Spinner` · `GradientBar` · `ScrollBar` · `ResizeHandle` · `CloseButton` · `Terminal` · `TextEditor` · `CodeEditor` · `TreeView` · `FilePicker` · `ShortcutHelpBar` · `TimeAndSales` · `PositionList` · `PositionPanel` · `Orders` · `PnL` · `LatencyMonitor` · `RiskMonitor` · `MarketStatus` · `OrderEntry` | `Flex` · `Grid` · `Split` · `FixedSize` · `SizeBounds` · `Padding` · `Stack` · `Overlay` · `Modal` · `Center` · `Bordered` · `BorderedRounded` · `ClosableRounded` · `Responsive` · `Retained` · `FitHeight` · `Wrap` |
 
 Interactive widgets use the focus and mouse contracts provided by `app.App`. Layout nodes determine placement and sizing without turning layout containers into widgets.
 
@@ -300,7 +300,7 @@ The rest of the showcases are worth a look too — together they exercise almost
 | `go run ./examples/showcase_layouts` | Panels and labels composed to demonstrate the layout primitives themselves |
 | `go run ./examples/showcase_controls` | A calm, single-accent screen of buttons, toggles, sliders, and text inputs |
 | `go run ./examples/showcase_settings` | A settings screen: toggles, sliders, badges, gradient bars, and dividers |
-| `go run ./examples/showcase_observability` | Gauges, stats, a spinner, a fast log view, and a command palette |
+| `go run ./examples/showcase_observability` | Gauges, stats, a spinner, a fast log view, a scrolling worker-load heatmap, and a command palette |
 | `go run ./examples/showcase_tasks` | Tables, tabs, a plain list, and a virtualized list working together |
 | `go run ./examples/showcase_static` | A quieter, mostly-static dashboard layout for lower-refresh-rate use cases |
 
@@ -1059,6 +1059,26 @@ for _, value := range samples {
 ```
 
 Use it for latency, traffic, prices, utilization, and other compact trends.
+
+---
+
+#### Heatmap
+
+A fixed-size grid of scalar values rendered as solid colored cells — a per-core load matrix, an error-rate grid bucketed by service and minute, or an order-book depth/correlation matrix.
+
+```go
+grid := widget.NewHeatmap(24, 8, 0, 100) // 24 cols x 8 rows, values normalized into [0,100]
+
+grid.SetRow(0, latestCoreLoads) // len(latestCoreLoads) == 24
+grid.Set(3, 2, 87.5)            // or update a single cell
+```
+
+`Set`/`SetRow` copy into preallocated storage under a short lock and are safe to call from a metrics/market-data goroutine while `Draw` runs on the render goroutine. Unlike `Sparkline`, the color domain is a fixed `[min, max]` set at construction (change it deliberately with `SetRange`) rather than auto-ranged, so a value's color stays stable across frames and a single `Set` call only invalidates its own row.
+
+```go
+grid.Low, grid.High = color.NordCyan, color.NordRed // cool -> hot; defaults to theme.Info -> theme.Negative
+grid.CellWidth = 2                                   // terminal columns per grid cell (default 2, roughly square)
+```
 
 ---
 

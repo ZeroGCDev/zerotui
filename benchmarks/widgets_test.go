@@ -152,6 +152,17 @@ func BenchmarkWidgetGradientBarDraw(b *testing.B) {
 	w := widget.NewGradientBar(geometryColor(20, 200, 120), geometryColor(200, 80, 80), geometryColor(20, 20, 30))
 	benchWidgetDraw(b, w, geometry.Rect{X: 1, Y: 1, W: 80, H: 1})
 }
+func BenchmarkWidgetHeatmapDraw(b *testing.B) {
+	w := widget.NewHeatmap(60, 20, 0, 100)
+	row := make([]float64, 60)
+	for r := 0; r < 20; r++ {
+		for c := range row {
+			row[c] = float64((r*60 + c) % 100)
+		}
+		w.SetRow(r, row)
+	}
+	benchWidgetDraw(b, w, geometry.Rect{X: 1, Y: 1, W: 120, H: 20})
+}
 func geometryColor(r, g, bb uint8) (c color.Color) { return color.RGB(r, g, bb) }
 
 func BenchmarkWidgetKeyHandling(b *testing.B) {
